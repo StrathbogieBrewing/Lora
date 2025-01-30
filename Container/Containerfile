@@ -1,0 +1,25 @@
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USER=root
+
+
+RUN apt-get clean && \
+    apt-get update && \
+    apt-get install -y curl python3 screen socat nano libusb-1.0-0 libglib2.0-0t64 && \
+    apt-get clean
+
+
+RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/bin sh
+
+
+RUN arduino-cli core update-index
+
+RUN arduino-cli core install arduino:avr
+RUN arduino-cli core --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json install esp32:esp32
+RUN arduino-cli core --additional-urls https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json install STMicroelectronics:stm32
+RUN arduino-cli core --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json install rp2040:rp2040
+
+RUN arduino-cli config init
+RUN arduino-cli config set directories.user /Arduino
+
+# STMCubeProgrammer needs to me installed manually and its path added
