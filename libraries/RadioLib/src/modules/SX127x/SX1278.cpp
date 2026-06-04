@@ -6,42 +6,53 @@ SX1278::SX1278(Module* mod) : SX127x(mod) {
 
 }
 
-int16_t SX1278::begin(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t syncWord, int8_t power, uint16_t preambleLength, uint8_t gain) {
+int16_t SX1278::begin(const ConfigLoRa_t& cfg) {
   // execute common part
   const uint8_t versions[] = { RADIOLIB_SX1278_CHIP_VERSION, RADIOLIB_SX1278_CHIP_VERSION_ALT, RADIOLIB_SX1278_CHIP_VERSION_RFM9X };
-  int16_t state = SX127x::begin(versions, 3, syncWord, preambleLength);
+  int16_t state = SX127x::begin(versions, 3, cfg.syncWord, cfg.preambleLength);
   RADIOLIB_ASSERT(state);
 
   // configure publicly accessible settings
-  state = setBandwidth(bw);
+  state = setBandwidth(cfg.bandwidth);
   RADIOLIB_ASSERT(state);
 
-  state = setFrequency(freq);
+  state = setFrequency(cfg.frequency);
   RADIOLIB_ASSERT(state);
 
-  state = setSpreadingFactor(sf);
+  state = setSpreadingFactor(cfg.spreadingFactor);
   RADIOLIB_ASSERT(state);
 
-  state = setCodingRate(cr);
+  state = setCodingRate(cfg.codingRate);
   RADIOLIB_ASSERT(state);
 
-  state = setOutputPower(power);
+  state = setOutputPower(cfg.power);
   RADIOLIB_ASSERT(state);
 
-  state = setGain(gain);
+  state = setGain(this->gain);
   RADIOLIB_ASSERT(state);
 
   // set publicly accessible settings that are not a part of begin method
   state = setCRC(true);
-  RADIOLIB_ASSERT(state);
-
   return(state);
 }
 
-int16_t SX1278::beginFSK(float freq, float br, float freqDev, float rxBw, int8_t power, uint16_t preambleLength, bool enableOOK) {
+int16_t SX1278::begin(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t syncWord, int8_t power, uint16_t preambleLength, uint8_t gain) {
+  ConfigLoRa_t cfg;
+  cfg.frequency = freq;
+  cfg.bandwidth = bw;
+  cfg.spreadingFactor = sf;
+  cfg.codingRate = cr;
+  cfg.syncWord = syncWord;
+  cfg.power = power;
+  cfg.preambleLength = preambleLength;
+  this->gain = gain;
+  return(begin(cfg));
+}
+
+int16_t SX1278::beginFSK(const ConfigFSK_t& cfg) {
   // execute common part
   const uint8_t versions[] = { RADIOLIB_SX1278_CHIP_VERSION, RADIOLIB_SX1278_CHIP_VERSION_ALT, RADIOLIB_SX1278_CHIP_VERSION_RFM9X };
-  int16_t state = SX127x::beginFSK(versions, 3, freqDev, rxBw, preambleLength, enableOOK);
+  int16_t state = SX127x::beginFSK(versions, 3, cfg.frequencyDeviation, cfg.receiverBandwidth, cfg.preambleLength);
   RADIOLIB_ASSERT(state);
 
   // configure settings not accessible by API
@@ -49,16 +60,16 @@ int16_t SX1278::beginFSK(float freq, float br, float freqDev, float rxBw, int8_t
   RADIOLIB_ASSERT(state);
 
   // configure publicly accessible settings
-  state = setFrequency(freq);
+  state = setFrequency(cfg.frequency);
   RADIOLIB_ASSERT(state);
 
-  state = setBitRate(br);
+  state = setBitRate(cfg.bitRate);
   RADIOLIB_ASSERT(state);
 
-  state = setOutputPower(power);
+  state = setOutputPower(cfg.power);
   RADIOLIB_ASSERT(state);
 
-  if(enableOOK) {
+  if(this->enableOOK) {
     state = setDataShapingOOK(RADIOLIB_SHAPING_NONE);
     RADIOLIB_ASSERT(state);
   } else {
@@ -68,9 +79,19 @@ int16_t SX1278::beginFSK(float freq, float br, float freqDev, float rxBw, int8_t
 
   // set publicly accessible settings that are not a part of begin method
   state = setCRC(true);
-  RADIOLIB_ASSERT(state);
-
   return(state);
+}
+
+int16_t SX1278::beginFSK(float freq, float br, float freqDev, float rxBw, int8_t power, uint16_t preambleLength, bool enableOOK) {
+  ConfigFSK_t cfg;
+  cfg.frequency = freq;
+  cfg.bitRate = br;
+  cfg.frequencyDeviation = freqDev;
+  cfg.receiverBandwidth = rxBw;
+  cfg.power = power;
+  cfg.preambleLength = preambleLength;
+  this->enableOOK = enableOOK;
+  return(beginFSK(cfg));
 }
 
 void SX1278::reset() {
@@ -83,7 +104,14 @@ void SX1278::reset() {
 }
 
 int16_t SX1278::setFrequency(float freq) {
-  RADIOLIB_CHECK_RANGE(freq, 137.0f, 525.0f, RADIOLIB_ERR_INVALID_FREQUENCY);
+  // NOTE: The datasheet specifies Band 2 as 410-525 MHz, but the hardware has been
+  // verified to work down to ~395 MHz. The lower bound is set here to 395 MHz to
+  // accommodate real-world use cases (e.g. TinyGS satellites, radiosondes) while
+  // adding a small margin below the 400 MHz practical limit.
+  if(!(((freq >= 137.0f) && (freq <= 175.0f)) ||
+       ((freq >= 395.0f) && (freq <= 525.0f)))) {
+    return(RADIOLIB_ERR_INVALID_FREQUENCY);
+  }
 
   // set frequency and if successful, save the new setting
   int16_t state = SX127x::setFrequencyRaw(freq);
@@ -136,8 +164,10 @@ int16_t SX1278::setBandwidth(float bw) {
       float symbolLength = (float)(uint32_t(1) << SX127x::spreadingFactor) / (float)SX127x::bandwidth;
       Module* mod = this->getMod();
       if(symbolLength >= 16.0f) {
+        this->ldroEnabled = true;
         state = mod->SPIsetRegValue(RADIOLIB_SX1278_REG_MODEM_CONFIG_3, RADIOLIB_SX1278_LOW_DATA_RATE_OPT_ON, 3, 3);
       } else {
+        this->ldroEnabled = false;
         state = mod->SPIsetRegValue(RADIOLIB_SX1278_REG_MODEM_CONFIG_3, RADIOLIB_SX1278_LOW_DATA_RATE_OPT_OFF, 3, 3);
       }
     }
@@ -209,6 +239,9 @@ int16_t SX1278::setCodingRate(uint8_t cr) {
 
   // check allowed coding rate values
   switch(cr) {
+    case 4:
+      newCodingRate = RADIOLIB_SX1278_CR_4_4;
+      break;
     case 5:
       newCodingRate = RADIOLIB_SX1278_CR_4_5;
       break;
@@ -237,12 +270,26 @@ int16_t SX1278::setBitRate(float br) {
   return(SX127x::setBitRateCommon(br, RADIOLIB_SX1278_REG_BIT_RATE_FRAC));
 }
 
-int16_t SX1278::setDataRate(DataRate_t dr) {
-  int16_t state = RADIOLIB_ERR_UNKNOWN;
+int16_t SX1278::setDataRate(DataRate_t dr, ModemType_t modem) {
+  // get the current modem
+  ModemType_t currentModem;
+  int16_t state = this->getModem(&currentModem);
+  RADIOLIB_ASSERT(state);
 
-  // select interpretation based on active modem
-  uint8_t modem = this->getActiveModem();
-  if(modem == RADIOLIB_SX127X_FSK_OOK) {
+  // switch over if the requested modem is different
+  if(modem != RADIOLIB_MODEM_NONE && modem != currentModem) {
+    state = this->standby();
+    RADIOLIB_ASSERT(state);
+    state = this->setModem(modem);
+    RADIOLIB_ASSERT(state);
+  }
+  
+  if(modem == RADIOLIB_MODEM_NONE) {
+    modem = currentModem;
+  }
+
+  // select interpretation based on modem
+  if(modem == RADIOLIB_MODEM_FSK) {
     // set the bit rate
     state = this->setBitRate(dr.fsk.bitRate);
     RADIOLIB_ASSERT(state);
@@ -250,7 +297,7 @@ int16_t SX1278::setDataRate(DataRate_t dr) {
     // set the frequency deviation
     state = this->setFrequencyDeviation(dr.fsk.freqDev);
 
-  } else if(modem == RADIOLIB_SX127X_LORA) {
+  } else if(modem == RADIOLIB_MODEM_LORA) {
     // set the spreading factor
     state = this->setSpreadingFactor(dr.lora.spreadingFactor);
     RADIOLIB_ASSERT(state);
@@ -266,22 +313,27 @@ int16_t SX1278::setDataRate(DataRate_t dr) {
   return(state);
 }
 
-int16_t SX1278::checkDataRate(DataRate_t dr) {
+int16_t SX1278::checkDataRate(DataRate_t dr, ModemType_t modem) {
   int16_t state = RADIOLIB_ERR_UNKNOWN;
 
-  // select interpretation based on active modem
-  int16_t modem = getActiveModem();
-  if(modem == RADIOLIB_SX127X_FSK_OOK) {
+  // retrieve modem if not supplied
+  if(modem == RADIOLIB_MODEM_NONE) {
+    state = this->getModem(&modem);
+    RADIOLIB_ASSERT(state);
+  }
+
+  // select interpretation based on modem
+  if(modem == RADIOLIB_MODEM_FSK) {
     RADIOLIB_CHECK_RANGE(dr.fsk.bitRate, 0.5f, 300.0f, RADIOLIB_ERR_INVALID_BIT_RATE);
     if(!((dr.fsk.freqDev + dr.fsk.bitRate/2.0f <= 250.0f) && (dr.fsk.freqDev <= 200.0f))) {
       return(RADIOLIB_ERR_INVALID_FREQUENCY_DEVIATION);
     }
     return(RADIOLIB_ERR_NONE);
 
-  } else if(modem == RADIOLIB_SX127X_LORA) {
+  } else if(modem == RADIOLIB_MODEM_LORA) {
     RADIOLIB_CHECK_RANGE(dr.lora.spreadingFactor, 6, 12, RADIOLIB_ERR_INVALID_SPREADING_FACTOR);
     RADIOLIB_CHECK_RANGE(dr.lora.bandwidth, 0.0f, 510.0f, RADIOLIB_ERR_INVALID_BANDWIDTH);
-    RADIOLIB_CHECK_RANGE(dr.lora.codingRate, 5, 8, RADIOLIB_ERR_INVALID_CODING_RATE);
+    RADIOLIB_CHECK_RANGE(dr.lora.codingRate, 4, 8, RADIOLIB_ERR_INVALID_CODING_RATE);
     return(RADIOLIB_ERR_NONE);
   
   }
@@ -293,8 +345,9 @@ int16_t SX1278::setOutputPower(int8_t power) {
   return(this->setOutputPower(power, false));
 }
 
-int16_t SX1278::setOutputPower(int8_t power, bool useRfo) {
+int16_t SX1278::setOutputPower(int8_t power, bool forceRfo) {
   // check if power value is configurable
+  bool useRfo = (power < 2) || forceRfo;
   int16_t state = checkOutputPower(power, NULL, useRfo);
   RADIOLIB_ASSERT(state);
 
@@ -344,9 +397,9 @@ int16_t SX1278::checkOutputPower(int8_t power, int8_t* clipped, bool useRfo) {
   if(useRfo) {
     // RFO output
     if(clipped) {
-      *clipped = RADIOLIB_MAX(-3, RADIOLIB_MIN(15, power));
+      *clipped = RADIOLIB_MAX(-4, RADIOLIB_MIN(15, power));
     }
-    RADIOLIB_CHECK_RANGE(power, -3, 15, RADIOLIB_ERR_INVALID_OUTPUT_POWER);
+    RADIOLIB_CHECK_RANGE(power, -4, 15, RADIOLIB_ERR_INVALID_OUTPUT_POWER);
   } else {
     // PA_BOOST output, check high-power operation
     if(clipped) {
@@ -479,7 +532,7 @@ float SX1278::getRSSI(bool packet, bool skipReceive) {
   if(frequency < 868.0f) {
     offset = -164;
   }
-  return(SX127x::getRSSI(packet, skipReceive, offset));
+  return(SX127x::getRSSICommon(packet, skipReceive, offset));
 }
 
 int16_t SX1278::setCRC(bool enable, bool mode) {
@@ -518,6 +571,7 @@ int16_t SX1278::forceLDRO(bool enable) {
 
   Module* mod = this->getMod();
   this->ldroAuto = false;
+  this->ldroEnabled = enable;
   if(enable) {
     return(mod->SPIsetRegValue(RADIOLIB_SX1278_REG_MODEM_CONFIG_3, RADIOLIB_SX1278_LOW_DATA_RATE_OPT_ON, 3, 3));
   } else {

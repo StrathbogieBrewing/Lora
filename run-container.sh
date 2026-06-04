@@ -1,0 +1,1 @@
+podman run --rm -it -v $PWD:/Arduino -w /Arduino -v /dev/:/dev/ --group-add keep-groups localhost/arduino 
