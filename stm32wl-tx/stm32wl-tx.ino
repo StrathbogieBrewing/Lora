@@ -12,7 +12,7 @@
 #define BUFFER_SIZE 16
 
 // #define SLEEP_MS (10000UL)
-#define SLEEP_MS (60000UL * 10UL)
+#define SLEEP_MS (60000UL * 5UL)
 
 /* Get the rtc object */
 STM32RTC &rtc = STM32RTC::getInstance();

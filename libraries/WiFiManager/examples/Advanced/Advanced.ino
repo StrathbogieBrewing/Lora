@@ -4,7 +4,7 @@
  */
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 
-#define TRIGGER_PIN 0
+#define TRIGGER_PIN 21
 
 // wifimanager can run in a blocking mode or a non blocking mode
 // Be sure to know how to process loops with no delay() if using non blocking

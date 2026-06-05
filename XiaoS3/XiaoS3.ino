@@ -9,11 +9,13 @@
 #define LORA_MISO 8
 #define LORA_MOSI 9
 
+#define TRIGGER_PIN 21
+
 // static SPIClass spi;
 SX1262 radio = new Module(LORA_NSS, LORA_DIO_1, LORA_RESET, LORA_BUSY);
 
+// WiFiManager wm;
 
-WiFiManager wm;
 // flag to indicate that a packet was received
 volatile bool receivedFlag = false;
 
@@ -36,29 +38,32 @@ void hexdump(uint8_t *data, size_t len) {
     Serial.println();
 }
 
-void setup() {
-    WiFi.mode(WIFI_STA);
-    Serial.begin(115200);
-    SPI.begin(LORA_SCLK, LORA_MISO, LORA_MOSI);
-    
-
-    bool res = wm.autoConnect("AutoConnectAP"); 
-    if (!res) {
-        Serial.println("Failed to connect");
+void checkButton() {
+    // check for button press
+    if (digitalRead(TRIGGER_PIN) == LOW) {
         ESP.restart();
     }
+}
 
-    // initialize SX1262 at 434 MHz
-    Serial.print(F("[SX1262] Initializing ... "));
-    // ConfigLoRa_t config;
-    // config.frequency = 434;
+void setup() {
+    WiFi.mode(WIFI_STA);
+    pinMode(TRIGGER_PIN, INPUT);
+    Serial.begin(115200);
+    SPI.begin(LORA_SCLK, LORA_MISO, LORA_MOSI);
+
+    // bool res = wm.autoConnect("AutoConnectAP");
+    // if (!res) {
+    //     Serial.println("Failed to connect");
+    //     ESP.restart();
+    // }
+
     int state =
         radio.begin(916.0, 125.0, 10, 8, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 14,
                     8, 3.0, true);
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println(F("success!"));
+        // Serial.println(F("success!"));
     } else {
-        Serial.print(F("failed, code "));
+        Serial.print(F("Initializing failed, code "));
         Serial.println(state);
         while (true) {
             delay(10);
@@ -70,39 +75,25 @@ void setup() {
     radio.setPacketReceivedAction(setFlag);
 
     // start listening for LoRa packets
-    Serial.print(F("[SX1262] Starting to listen ... "));
+    // Serial.print(F("[SX1262] Starting to listen ... "));
     state = radio.startReceive();
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println(F("success!"));
+        // Serial.println(F("success!"));
     } else {
-        Serial.print(F("failed, code "));
+        Serial.print(F("Starting to listen failed, code "));
         Serial.println(state);
         while (true) {
             delay(10);
         }
     }
-
-    // if needed, 'listen' mode can be disabled by calling
-    // any of the following methods:
-    //
-    // radio.standby()
-    // radio.sleep()
-    // radio.transmit();
-    // radio.receive();
-    // radio.scanChannel();
 }
 
 void loop() {
+    checkButton();
     // check if the flag is set
     if (receivedFlag) {
         // reset flag
         receivedFlag = false;
-
-        // you can read received data as an Arduino String
-        // String str;
-        // int state = radio.readData(str);
-
-        // you can also read received data as byte array
 
         byte byteArr[256];
         int numBytes = radio.getPacketLength();
@@ -110,36 +101,23 @@ void loop() {
 
         if (state == RADIOLIB_ERR_NONE) {
             // packet was successfully received
-            Serial.println(F("[SX1262] Received packet!"));
-
-            // print data of the packet
-            Serial.print(F("[SX1262] Data:\t\t"));
-            // Serial.println(str);
-            hexdump(byteArr, numBytes);
-
-            // print RSSI (Received Signal Strength Indicator)
-            Serial.print(F("[SX1262] RSSI:\t\t"));
-            Serial.print(radio.getRSSI());
-            Serial.println(F(" dBm"));
-
-            // print SNR (Signal-to-Noise Ratio)
-            Serial.print(F("[SX1262] SNR:\t\t"));
-            Serial.print(radio.getSNR());
-            Serial.println(F(" dB"));
-
-            // print frequency error
-            Serial.print(F("[SX1262] Frequency error:\t"));
-            Serial.print(radio.getFrequencyError());
-            Serial.println(F(" Hz"));
-
+            int rssi = round(radio.getRSSI());
+            int snr = round(radio.getSNR());
+            int fence = ((uint16_t)byteArr[8] << 8) + (uint16_t)byteArr[9];
+            int battery = ((uint16_t)byteArr[6] << 8) + (uint16_t)byteArr[7];
+            int temp = ((uint16_t)byteArr[10] << 8) + (uint16_t)byteArr[11];
+            Serial.printf("{\"fence\":%d,\"battery\":%.3f,\"temp\":%d,\"rssi\":"
+                          "%d,\"snr\":%d}\n",
+                          fence, (float)battery / 1000.0, temp, rssi, snr);
+            // hexdump(byteArr,numBytes);
         } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
             // packet was received, but is malformed
-            Serial.println(F("CRC error!"));
+            // Serial.println(F("CRC error!"));
 
         } else {
             // some other error occurred
-            Serial.print(F("failed, code "));
-            Serial.println(state);
+            // Serial.print(F("failed, code "));
+            // Serial.println(state);
         }
     }
 }
